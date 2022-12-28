@@ -1,6 +1,7 @@
 import time
 import random
 from datetime import datetime
+import argparse
 
 import yaml
 import numpy as np
@@ -20,22 +21,22 @@ torch.manual_seed(seed)
 np.random.seed(seed)
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-class Agent(DQNAgent):
-    def __init__(self):
+
+class SnakeDQNAgent(DQNAgent):
+    def __init__(self, args):
         env_name = "snake_ai"
 
         # test settings
-        self.is_log = True
-        # self.load_from = "checkpoint/snake_ai/DQNAgent/2022-12-27_21:58:52/ep_40.pt"
-        self.load_from = None
+        self.is_log = args.log
+        self.load_from = args.load_from
+        self.save_period = args.save_period
+        self.episode_num = args.episode_num
+        self.max_episode_steps = args.max_episode_steps
+        cfg_path = args.cfg_path
         self.is_test = False
-        self.save_period = 500
-        self.episode_num = 10000
-        self.max_episode_steps = 10000
-        self.interim_test_num = None  # 100
+        self.interim_test_num = None
 
         # hyper parameters
-        cfg_path = "config/dqn.yaml"
         cfg = self.get_cfg(cfg_path)
         self.hyper_params = cfg.hyper_params
         self.optim_cfg = cfg.learner_cfg.optim_cfg
@@ -248,8 +249,3 @@ class Agent(DQNAgent):
             if self.i_episode % self.save_period == 0:
                 self.learner.save_params(self.i_episode)
                 # self.interim_test()
-
-
-if __name__ == "__main__":
-    agent = Agent()
-    agent.train()
