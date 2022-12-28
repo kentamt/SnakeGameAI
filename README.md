@@ -3,6 +3,10 @@ AI driven snake game using Reinforcement Learning and Deep Q Learning.<br>
 
 The game of Snake actually has a trivial, unbeatable solution. It can be driven by <b> Simple Non-ML Technique </b>by just traversing every block of the board, this gives the unbeateablre solution but it is very time taking and very brute force approach.<br>
 
+# Logger
+<img width="1012" alt="image" src="https://user-images.githubusercontent.com/3883043/209792311-0a7f406a-9471-428b-adde-33aff116094b.png">
+
+
 But we will be using reinforcement learning techinque.
 ## Reinforcement Learning
 The first question arises in mind that why we are using reinforcement learning instead of supervised machine learning, the answer is, in supervised ML algorithms need to be trained with an input and a “correct answer” called target.In this example, we don’t know what the best action to take at each stage of the game is, so a traditional approach would not be effective.<br>
