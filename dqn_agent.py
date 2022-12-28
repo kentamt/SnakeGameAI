@@ -18,14 +18,14 @@ seed = 0
 random.seed(seed)
 torch.manual_seed(seed)
 np.random.seed(seed)
-
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 class Agent(DQNAgent):
     def __init__(self):
         env_name = "snake_ai"
 
         # test settings
-        self.is_log = False
+        self.is_log = True
         # self.load_from = "checkpoint/snake_ai/DQNAgent/2022-12-27_21:58:52/ep_40.pt"
         self.load_from = None
         self.is_test = False
@@ -164,14 +164,12 @@ class Agent(DQNAgent):
 
     def select_action(self, state):
         self.curr_state = state
-        final_move = [0, 0, 0]
         r = np.random.random()
         if not self.is_test and self.epsilon > r:
             move = random.randint(0, 2)
         else:
             with torch.no_grad():
-                state0 = torch.tensor(state, dtype=torch.float).cpu()
-                # prediction = self.model(state0).cpu()  # prediction by model
+                state0 = torch.tensor(state, dtype=torch.float).to(device)
                 prediction = self.learner.dqn(state0).cpu()
                 move = torch.argmax(prediction).item()
 

@@ -14,16 +14,17 @@ from torch.nn.utils import clip_grad_norm_
 from rl_algorithms.common.abstract.learner import Learner, TensorTuple
 import rl_algorithms.common.helper_functions as common_utils
 
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 class DQN(nn.Module):
     def __init__(self, input_size, hidden_sizes, output_size):
         super().__init__()
-        self.linear = nn.Linear(input_size, hidden_sizes[0]).cpu()
+        self.linear = nn.Linear(input_size, hidden_sizes[0]).to(device)
         self.hidden_list = []
-        # self.hidden = nn.Linear(hidden_size, hidden_size).cpu()
+        # self.hidden = nn.Linear(hidden_size, hidden_size).to(device)
         for i, hidden_size in enumerate(hidden_sizes[1:]):
-            self.hidden_list.append(nn.Linear(hidden_size, hidden_size).cpu())
-        self.head = nn.Linear(hidden_sizes[-1], output_size).cpu()
+            self.hidden_list.append(nn.Linear(hidden_size, hidden_size).to(device))
+        self.head = nn.Linear(hidden_sizes[-1], output_size).to(device)
 
     def forward(self, x):
         x = F.relu(self.linear(x))

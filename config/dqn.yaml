@@ -6,7 +6,7 @@ hyper_params:
   batch_size: 128  # openai baselines: 32
   update_starts_from: 128  # openai baselines: 10000
   multiple_update: 10  # multiple learning updates
-  train_freq: 10  # in openai baselines, train_freq = 4
+  train_freq: 128  # in openai baselines, train_freq = 4
   gradient_clip: 10.0  # dueling: 10.0
   n_step: 3
   w_n_step: 1.0
