@@ -251,6 +251,129 @@ class Agent(DQNAgent):
                 self.learner.save_params(self.i_episode)
                 # self.interim_test()
 
+    def train_mp(self, q, i):
+
+        if not self.is_test:
+            # replay memory for a single step
+            self.tmp_memory = ReplayBuffer(
+                self.hyper_params.buffer_size,
+                self.hyper_params.batch_size,
+            )
+            self.memory: PrioritizedBufferWrapper = PrioritizedBufferWrapper(
+                self.tmp_memory, alpha=self.hyper_params.per_alpha
+            )
+
+            # replay memory for multi-steps
+            if self.use_n_step:
+                self.memory_n = ReplayBuffer(
+                    self.hyper_params.buffer_size,
+                    self.hyper_params.batch_size,
+                    n_step=self.hyper_params.n_step,
+                    gamma=self.hyper_params.gamma,
+                )
+
+        avg_time_costs = []
+        scores = []
+        state = self.get_state(self.game)
+        self.episode_step = 0
+        done = False
+        t_begin = time.time()
+        score = 0
+        while not done and self.max_episode_steps > self.episode_step:
+            action = self.select_action(state)
+            action = np.array(action)
+            next_state, reward, done, score = self.step(action)
+            self.total_step += 1
+            self.episode_step += 1
+            state = next_state[:]
+            scores.append(score)
+
+        print(f"{i}, {self.episode_step=}")
+
+        t_end = time.time()
+        avg_time_costs.append((t_end - t_begin) / self.episode_step)
+
+        # add all experiences to queues
+        idx = len(self.memory)
+        obs = self.memory.buffer.obs_buf[:idx]
+        action = self.memory.buffer.acts_buf[:idx]
+        reward = self.memory.buffer.rews_buf[:idx]
+        next_obs = self.memory.buffer.next_obs_buf[:idx]
+        done = self.memory.buffer.done_buf[:idx]
+        q.put((obs, action, reward, next_obs, done, scores))
+
+
+    def train_multi_proc(self, num_proc=4):
+
+        if self.is_log:
+            self.set_wandb()
+            # wandb.watch([self.dqn], log="parameters")
+
+
+        for self.i_episode in range(1, self.episode_num + 1):
+            print(f"*************** {self.i_episode=}")
+            processes = []
+            queues = []
+            for i in range(num_proc):
+                self_copy = Agent()
+                # self_copy = deepcopy(self)
+                q = mp.Queue()
+                p = mp.Process(target=self_copy.train_mp, args=(q, i))
+                processes.append(p)
+                queues.append(q)
+                p.start()
+
+            # Wait for all processes to finish
+            for p in processes:
+                p.join()
+            print('All processes have ended')
+
+            # Get the results from the queue and add them to replay buffer
+            score_proc = [None] * num_proc
+            for i, q in enumerate(queues):
+                transitions = q.get()
+                for s, a, r, n_s, done, score in zip(*transitions):
+                    a = np.array(a)
+                    transition = (s, a, r, n_s, done)
+                    self._add_transition_to_memory(transition)
+                    score_proc[i] = score  # keep trac the last one
+            score = np.max(score_proc)
+
+            losses = list()
+            if len(self.memory) >= self.hyper_params.update_starts_from:
+                for _ in range(self.hyper_params.multiple_update):
+                    experience = self.sample_experience()
+                    info = self.learner.update_model(experience)
+                    loss = info[0:2]
+                    indices, new_priorities = info[2:4]
+                    losses.append(loss)  # for logging
+                    self.memory.update_priorities(indices, new_priorities)
+
+                # decrease epsilon
+                self.epsilon = max(
+                    self.epsilon
+                    - (self.max_epsilon - self.min_epsilon)
+                    * self.hyper_params.epsilon_decay,
+                    self.min_epsilon,
+                )
+                print(f"{self.epsilon=}")
+
+                # increase priority beta
+                fraction = min(float(self.i_episode) / self.episode_num, 1.0)
+                self.per_beta = self.per_beta + fraction * (1.0 - self.per_beta)
+                print(f"{fraction=}")
+
+                for q in queues:
+                    q.close()
+
+            self.game.reset()
+
+            if losses:
+                avg_loss = np.vstack(losses).mean(axis=0)
+                log_value = (self.i_episode, avg_loss, score, 0)
+                # print(log_value)
+                self.write_log(log_value)
+
 
 if __name__ == "__main__":
     agent = Agent()
