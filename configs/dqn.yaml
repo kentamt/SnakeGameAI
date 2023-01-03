@@ -14,9 +14,9 @@ hyper_params:
   per_alpha: 0.6  # openai baselines: 0.6
   per_beta: 0.4
   per_eps: 0.000001
-  max_epsilon: 1.0
+  max_epsilon: 0.9
   min_epsilon: 0.01  # openai baselines: 0.01
-  epsilon_decay: 0.00001  # openai baselines: 1e-7 / 1e-1
+  epsilon_decay: 0.0001  # openai baselines: 1e-7 / 1e-1
 
 learner_cfg:
   type: "DQNLearner"

@@ -1,6 +1,6 @@
 import argparse
 from dqn_agent import SnakeDQNAgent
-
+import torch
 
 def parse_args() -> argparse.Namespace:
     # configurations
@@ -39,13 +39,13 @@ def parse_args() -> argparse.Namespace:
     #     help="start rendering after the input number of episode",
     # )
     parser.add_argument(
-        "--log", dest="log", action="store_true", help="turn on logging"
+        "--log", dest="log", action="store_true", default=True, help="turn on logging"
     )
     parser.add_argument(
         "--save-period", type=int, default=100, help="save model period"
     )
     parser.add_argument(
-        "--episode-num", type=int, default=1500, help="total episode num"
+        "--episode-num", type=int, default=10000, help="total episode num"
     )
     parser.add_argument(
         "--max-episode-steps", type=int, default=1000, help="max episode step"
@@ -61,6 +61,11 @@ def parse_args() -> argparse.Namespace:
 
 
 if __name__ == "__main__":
+    torch.multiprocessing.set_start_method('spawn')
+
     args = parse_args()
     agent = SnakeDQNAgent(args)
-    agent.train()
+    agent.initialise()
+
+    # agent.train()
+    agent.train_multi_proc(20)

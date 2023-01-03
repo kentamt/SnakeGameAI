@@ -226,7 +226,7 @@ class DQNAgent(Agent):
         experiences_1 = (
             numpy2floattensor(experiences_1[:6], self.learner.device)
             + experiences_1[6:]
-        )
+            )
 
         if self.use_n_step:
             indices = experiences_1[-2]

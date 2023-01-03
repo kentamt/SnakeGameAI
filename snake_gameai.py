@@ -5,8 +5,10 @@ from collections import namedtuple
 import numpy as np
 import math
 
-pygame.init()
-font = pygame.font.Font(pygame.font.get_default_font(), 25)
+
+import os
+os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = 'hide'
+
 
 
 # Reset
@@ -35,13 +37,18 @@ BLACK = (0, 0, 0)
 
 
 class SnakeGameAI:
-    def __init__(self, w=640, h=480):
+    def __init__(self, w=640, h=480, render=True):
         self.w = w
         self.h = h
+        self.render = render
+
         # init display
-        self.display = pygame.display.set_mode((self.w, self.h))
-        pygame.display.set_caption("Snake")
-        self.clock = pygame.time.Clock()
+        if render:
+            pygame.init()
+            self.display = pygame.display.set_mode((self.w, self.h))
+            self.font = pygame.font.Font(pygame.font.get_default_font(), 25)
+            pygame.display.set_caption("Snake")
+            # self.clock = pygame.time.Clock()
 
         # init game state
         self.reset()
@@ -68,11 +75,13 @@ class SnakeGameAI:
 
     def play_step(self, action):
         self.frame_iteration += 1
+
         # 1. Collect the user input
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                pygame.quit()
-                quit()
+        if self.render:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    quit()
 
         # 2. Move
         self._move(action)
@@ -95,10 +104,11 @@ class SnakeGameAI:
             self.snake.pop()
 
         # 5. Update UI and clock
-        self._update_ui()
-        self.clock.tick(SPEED)
-        # 6. Return game Over and Display Score
+        if self.render:
+            self._update_ui()
+            # self.clock.tick(SPEED)
 
+        # 6. Return game Over and Display Score
         return reward, game_over, self.score
 
     def _update_ui(self):
@@ -115,7 +125,7 @@ class SnakeGameAI:
             RED,
             pygame.Rect(self.food.x, self.food.y, BLOCK_SIZE, BLOCK_SIZE),
         )
-        text = font.render("Score: " + str(self.score), True, WHITE)
+        text = self.font.render("Score: " + str(self.score), True, WHITE)
         self.display.blit(text, [0, 0])
         pygame.display.flip()
 

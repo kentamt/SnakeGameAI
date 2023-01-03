@@ -1,7 +1,13 @@
+import os, signal
 import time
 import random
 from datetime import datetime
 import argparse
+from multiprocessing import Process, set_start_method
+import multiprocessing as mp
+from copy import deepcopy
+
+from torch.multiprocessing import Queue, Process
 
 import yaml
 import numpy as np
@@ -11,7 +17,7 @@ from rl_algorithms import DQNAgent
 from rl_algorithms.common.buffer.replay_buffer import ReplayBuffer
 from rl_algorithms.common.buffer.wrapper import PrioritizedBufferWrapper
 
-from dqn_learner import CustomDQNLearner
+from dqn_learner import CustomDQNLearner, DQN
 from snake_gameai import SnakeGameAI, Direction, Point, BLOCK_SIZE
 from config import create_object, EnvInfo, LogCfg
 
@@ -19,12 +25,17 @@ seed = 0
 random.seed(seed)
 torch.manual_seed(seed)
 np.random.seed(seed)
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-
 
 class SnakeDQNAgent(DQNAgent):
     def __init__(self, args):
-        env_name = "snake_ai"
+        self.env_name = "snake_ai"
+
+        # just for debug
+        self.args = args
+        self.game = SnakeGameAI(render=False)
+
+        args = self.args
+        env_name = self.env_name
 
         # test settings
         self.is_log = args.log
@@ -61,14 +72,21 @@ class SnakeDQNAgent(DQNAgent):
 
         # initialise a learner
         self.learner = None
-        self._initialize()
-        self.game = SnakeGameAI()
-
         #
         self.curr_state = np.zeros(1)
         self.episode_step = 0
         self.i_episode = 0
         self.total_step = 0
+        self.dqn = None
+
+    def initialise(self):
+        self._initialize()
+        self.dqn = self.learner.dqn
+
+    def copy(self):
+        new_obj = SnakeDQNAgent(self.args)
+        new_obj.dqn = deepcopy(self.dqn)  # pass reference. Is it thread safe?
+        return new_obj
 
     @staticmethod
     def get_cfg(cfg_path):
@@ -164,6 +182,7 @@ class SnakeDQNAgent(DQNAgent):
         return np.array(state, dtype=int)
 
     def select_action(self, state):
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         self.curr_state = state
         r = np.random.random()
         if not self.is_test and self.epsilon > r:
@@ -171,7 +190,8 @@ class SnakeDQNAgent(DQNAgent):
         else:
             with torch.no_grad():
                 state0 = torch.tensor(state, dtype=torch.float).to(device)
-                prediction = self.learner.dqn(state0).cpu()
+                # prediction = self.learner.dqn(state0).cpu()
+                prediction = self.dqn(state0).cpu()
                 move = torch.argmax(prediction).item()
 
         return move
@@ -188,6 +208,16 @@ class SnakeDQNAgent(DQNAgent):
             self._add_transition_to_memory(transition)
 
         return next_state, reward, done, info
+
+    def step_mp(self, action):
+        reward, done, score = self.game.play_step(action)
+        next_state = self.get_state(self.game)
+        info = score
+        if not self.is_test:
+            # if the last state is not a terminal state, store done as false
+            done_bool = False if self.episode_step == self.max_episode_steps else done
+
+        return next_state, reward, done_bool, info
 
     def train(self):
 
@@ -250,93 +280,74 @@ class SnakeDQNAgent(DQNAgent):
                 self.learner.save_params(self.i_episode)
                 # self.interim_test()
 
-    def train_mp(self, q, i):
+    def train_mp(self, data_q, flag_q, i, i_episode):
 
-        if not self.is_test:
-            # replay memory for a single step
-            self.tmp_memory = ReplayBuffer(
-                self.hyper_params.buffer_size,
-                self.hyper_params.batch_size,
-            )
-            self.memory: PrioritizedBufferWrapper = PrioritizedBufferWrapper(
-                self.tmp_memory, alpha=self.hyper_params.per_alpha
-            )
-
-            # replay memory for multi-steps
-            if self.use_n_step:
-                self.memory_n = ReplayBuffer(
-                    self.hyper_params.buffer_size,
-                    self.hyper_params.batch_size,
-                    n_step=self.hyper_params.n_step,
-                    gamma=self.hyper_params.gamma,
-                )
+        random.seed(i)
+        np.random.seed(i)
+        torch.random.manual_seed(i)
 
         avg_time_costs = []
-        scores = []
         state = self.get_state(self.game)
         self.episode_step = 0
         done = False
         t_begin = time.time()
-        score = 0
+        transitions = []
         while not done and self.max_episode_steps > self.episode_step:
             action = self.select_action(state)
             action = np.array(action)
-            next_state, reward, done, score = self.step(action)
+            next_state, reward, done, score = self.step_mp(action)
             self.total_step += 1
             self.episode_step += 1
             state = next_state[:]
-            scores.append(score)
+            transitions.append((state, action, reward, next_state, done, score))
 
-        print(f"{i}, {self.episode_step=}")
-
-        t_end = time.time()
-        avg_time_costs.append((t_end - t_begin) / self.episode_step)
-
-        # add all experiences to queues
-        idx = len(self.memory)
-        obs = self.memory.buffer.obs_buf[:idx]
-        action = self.memory.buffer.acts_buf[:idx]
-        reward = self.memory.buffer.rews_buf[:idx]
-        next_obs = self.memory.buffer.next_obs_buf[:idx]
-        done = self.memory.buffer.done_buf[:idx]
-        q.put((obs, action, reward, next_obs, done, scores))
-
+        print(f"{i}, {id(self)=}, {id(self.learner)=}, {self.episode_step=}, {i_episode=}")
+        flag_q.put(True)
+        data_q.put(transitions)
 
     def train_multi_proc(self, num_proc=4):
 
         if self.is_log:
             self.set_wandb()
-            # wandb.watch([self.dqn], log="parameters")
-
 
         for self.i_episode in range(1, self.episode_num + 1):
             print(f"*************** {self.i_episode=}")
             processes = []
-            queues = []
+            data_queues = []
+            flag_q = mp.Queue()
             for i in range(num_proc):
-                self_copy = Agent()
-                # self_copy = deepcopy(self)
-                q = mp.Queue()
-                p = mp.Process(target=self_copy.train_mp, args=(q, i))
+                data_q = mp.Queue()
+                p = mp.Process(target=self.train_mp, args=(data_q, flag_q, i, self.i_episode))
                 processes.append(p)
-                queues.append(q)
+                data_queues.append(data_q)
+
+            #
+            for p in processes:
                 p.start()
 
-            # Wait for all processes to finish
+            # wait for finish
+            for i in range(num_proc):
+                is_finished = flag_q.get()
+                print(f'proc[{i}] finished')
+
+            score_proc = [None] * num_proc
+            for i, q in enumerate(data_queues):
+                while not q.empty():
+                    # transition = q.get()
+                    # s, a, r, n_s, done, score = transition
+                    # self._add_transition_to_memory((s, a, r, n_s, done))
+                    # score_proc[i] = score  # keep trac the last one
+                    transitions = q.get()
+                    for s, a, r, n_s, done, score in transitions:
+                        transition = (s, a, r, n_s, done)
+                        self._add_transition_to_memory(transition)
+                        score_proc[i] = score  # keep trac the last one
+            score = np.max(score_proc)
+
+            # Wait for processes ends
             for p in processes:
                 p.join()
             print('All processes have ended')
-
-            # Get the results from the queue and add them to replay buffer
-            score_proc = [None] * num_proc
-            for i, q in enumerate(queues):
-                transitions = q.get()
-                for s, a, r, n_s, done, score in zip(*transitions):
-                    a = np.array(a)
-                    transition = (s, a, r, n_s, done)
-                    self._add_transition_to_memory(transition)
-                    score_proc[i] = score  # keep trac the last one
-            score = np.max(score_proc)
 
             losses = list()
             if len(self.memory) >= self.hyper_params.update_starts_from:
@@ -362,9 +373,6 @@ class SnakeDQNAgent(DQNAgent):
                 self.per_beta = self.per_beta + fraction * (1.0 - self.per_beta)
                 print(f"{fraction=}")
 
-                for q in queues:
-                    q.close()
-
             self.game.reset()
 
             if losses:
@@ -372,8 +380,3 @@ class SnakeDQNAgent(DQNAgent):
                 log_value = (self.i_episode, avg_loss, score, 0)
                 # print(log_value)
                 self.write_log(log_value)
-
-
-if __name__ == "__main__":
-    agent = Agent()
-    agent.train()

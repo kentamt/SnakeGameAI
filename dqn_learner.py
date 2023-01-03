@@ -16,7 +16,6 @@ import rl_algorithms.common.helper_functions as common_utils
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-
 class DQN(nn.Module):
     def __init__(self, input_size, hidden_sizes, output_size):
         super().__init__()
